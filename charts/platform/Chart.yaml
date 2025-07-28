@@ -1,7 +1,7 @@
 # charts/platform/Chart.yaml
 apiVersion: v2
 name: platform
-version: 0.0.0
+version: 1.0.3-next-2665bf6
 dependencies:
   - name: alaffia
     version: 0.0.0

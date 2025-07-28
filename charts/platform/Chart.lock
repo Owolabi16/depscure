@@ -1,0 +1,12 @@
+dependencies:
+- name: alaffia
+  repository: file://../alaffia
+  version: 0.0.0
+- name: fdw
+  repository: file://../fdw
+  version: 0.0.0
+- name: reports
+  repository: file://../reports
+  version: 0.0.0
+digest: sha256:14d8ea7c2d8a2558b007a48ff67ee021530adebb7ea93eda583cc36d3ac5f5e6
+generated: "2025-07-28T14:14:40.93422196Z"
