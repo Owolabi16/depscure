@@ -1,0 +1,171 @@
+name: "RC Next Release Automation f"
+description: "Updates platform charts and creates release PR for rc-next environment"
+
+inputs:
+  release_version:
+    description: "Release version (format: x-x-x)"
+    required: true
+  github_token:
+    description: "GitHub Token"
+    required: true
+  github_actor:
+    description: "GitHub Actor (Username)"
+    required: true
+  docker_hub_username:
+    description: "Docker Hub Username"
+    required: true
+  docker_hub_token:
+    description: "Docker Hub Token"
+    required: true
+  helm_registry:
+    description: "Helm Registry URL"
+    required: true
+  helm_username:
+    description: "Helm Registry Username"
+    required: true
+  services_to_deploy:
+    description: "Comma-separated list of services to deploy (e.g., 'alaffia,fdw,reports'). Leave empty to deploy all."
+    required: false
+    default: ""    
+
+outputs:
+  platform_version:
+    description: "The version of the platform chart"
+    value: ${{ steps.get_platform_version.outputs.platform_version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set branch name
+      id: set_branch
+      run: echo "branch_name=platform-${{ inputs.release_version }}" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Initialize repo
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check if branch exists
+      id: check_branch
+      run: |
+        if git ls-remote --exit-code --heads origin ${{ steps.set_branch.outputs.branch_name }}; then
+          echo "BRANCH_EXISTS=true" >> $GITHUB_ENV
+          echo "Branch exists"
+        else
+          echo "BRANCH_EXISTS=false" >> $GITHUB_ENV
+          echo "Branch doesn't exists"
+        fi
+      shell: bash
+
+    - name: Checkout consumer's repository branch (if exists) or fallback
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH_EXISTS == 'true' && steps.set_branch.outputs.branch_name || '' }}
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22.x'
+
+    - name: Configure gh cli
+      run: |
+        echo "GITHUB_TOKEN=${{ inputs.github_token }}" >> $GITHUB_ENV
+        echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+        git config user.name "${{ inputs.github_actor }}"
+        git config user.email "${{ inputs.github_actor }}@users.noreply.github.com"
+        gh auth setup-git
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ inputs.docker_hub_username }}
+        password: ${{ inputs.docker_hub_token }}
+
+    - name: Authenticate Registries
+      shell: bash
+      env:
+        HELM_REGISTRY: ${{ inputs.helm_registry }}
+        HELM_USER: ${{ inputs.helm_username }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: echo $GITHUB_TOKEN | helm registry login $HELM_REGISTRY -u $HELM_USER --password-stdin
+
+    - name: Update Chart Versions
+      run: ./scripts/platform-get-versions-from-service.sh "${{ inputs.release_version }}"
+      working-directory: ${{ github.action_path }}
+      env:
+        SHORT_SHA: ${{ env.SHORT_SHA }}
+        SERVICES_TO_DEPLOY: ${{ inputs.services_to_deploy }}
+      shell: bash
+
+    - name: Initial Helm Dependencies
+      id: helm_deps_1
+      run: ./scripts/helm-deps.sh 1
+      working-directory: ${{ github.action_path }}
+      shell: bash
+
+    - name: Trigger Downstream Workflows
+      run: node dist/trigger.js
+      working-directory: ${{ github.action_path }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        BRANCH_NAME: ${{ steps.set_branch.outputs.branch_name }}
+        FILE_LOCATION: ${{ github.workspace }}
+        SERVICES_TO_DEPLOY: ${{ inputs.services_to_deploy }}
+      shell: bash
+
+    - name: Final Helm Dependencies
+      id: helm_deps_2
+      run: helm dependency update
+      shell: bash
+      working-directory: ${{ github.workspace }}/charts/platform
+
+    - name: Check for Chart Changes
+      id: check_changes
+      run: ./scripts/check-changes.sh
+      working-directory: ${{ github.action_path }}
+      shell: bash
+
+    - name: Commit Changes
+      if: steps.check_changes.outputs.changes_detected == 'true'
+      run: |
+        git checkout -B ${{ steps.set_branch.outputs.branch_name }}
+        git add charts/platform/*
+        git commit -m "chore: Update platform charts for ${{ inputs.release_version }}" --no-verify
+        git push origin ${{ steps.set_branch.outputs.branch_name }}
+      shell: bash
+
+    - name: Check for existing PR
+      id: check_pr
+      run: |
+        default_branch=$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name')
+        existing_pr=$(gh pr list \
+          --base "$default_branch" \
+          --head "${{ steps.set_branch.outputs.branch_name }}" \
+          --state open \
+          --json number \
+          -q 'length')
+        echo "existing_pr=$existing_pr" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Create Pull Request
+      if: steps.check_changes.outputs.changes_detected == 'true' && steps.check_pr.outputs.existing_pr == '0'
+      run: |
+        default_branch=$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name')
+        gh pr create \
+          --title "Release ${{ inputs.release_version }}" \
+          --body "Automated platform release updates" \
+          --base "$default_branch" \
+          --head "${{ steps.set_branch.outputs.branch_name }}" \
+          --reviewer "${{ inputs.github_actor }}"
+      shell: bash
+
+    - name: Get Platform Version
+      id: get_platform_version
+      run: |
+        platform_version=$(yq e '.version' charts/platform/Chart.yaml)
+        echo "platform_version=$platform_version" >> $GITHUB_OUTPUT
+      shell: bash
