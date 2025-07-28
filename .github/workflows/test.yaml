@@ -14,9 +14,6 @@ on:
 jobs:
   test-deployment:
     runs-on: ubuntu-latest
-    env:
-      HELM_REGISTRY: ${{ vars.HELM_REGISTRY }}
-      HELM_USER: ${{ github.actor }}
     steps:
       - uses: actions/checkout@v4
       
