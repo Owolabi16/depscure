@@ -1,0 +1,29 @@
+name: Test Aliu  Selective Deployment
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Release version (format: x-x-x)'
+        required: true
+        default: '1-0-0'
+      services_to_deploy:
+        description: 'Services to deploy (comma-separated)'
+        required: false
+        default: ''
+
+jobs:
+  test-deployment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: ./
+        with:
+          release_version: ${{ inputs.release_version }}
+          services_to_deploy: ${{ inputs.services_to_deploy }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_actor: ${{ github.actor }}
+          docker_hub_username: ${{ secrets.DOCKER_USERNAME }}
+          docker_hub_token: ${{ secrets.DOCKER_TOKEN }}
+          helm_registry: ${{ vars.HELM_REGISTRY }}
+          helm_username: ${{ vars.HELM_USERNAME }}
