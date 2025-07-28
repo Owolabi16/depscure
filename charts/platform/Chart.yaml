@@ -1,0 +1,10 @@
+apiVersion: v2
+name: platform
+version: 0.0.0
+dependencies:
+  - name: alaffia
+    version: 0.0.0
+  - name: fdw
+    version: 0.0.0
+  - name: reports
+    version: 0.0.0
